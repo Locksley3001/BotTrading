@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deriv Rise/Fall Bot</title>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Deriv Rise/Fall</h1>
+        <p id="statusLine">Conectando estado operativo...</p>
+      </div>
+      <div class="top-actions">
+        <button id="brokerToggleBtn">Activar broker</button>
+        <div class="mode-pill" id="modePill">DEMO</div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="band metrics" aria-label="Estado operativo">
+        <article>
+          <span>WS público</span>
+          <strong id="publicWs">--</strong>
+        </article>
+        <article>
+          <span>Broker</span>
+          <strong id="brokerState">OFF</strong>
+        </article>
+        <article>
+          <span>Supabase</span>
+          <strong id="supabaseState">--</strong>
+        </article>
+        <article>
+          <span>Telegram</span>
+          <strong id="telegramState">--</strong>
+        </article>
+        <article>
+          <span>Motor vivo</span>
+          <strong id="engineState">--</strong>
+        </article>
+        <article>
+          <span>Saldo virtual</span>
+          <strong id="virtualBalance">$100.00</strong>
+        </article>
+        <article>
+          <span>Metas virtuales</span>
+          <strong id="virtualTargets">0</strong>
+        </article>
+        <article>
+          <span>Quiebras virtuales</span>
+          <strong id="virtualBankruptcies">0</strong>
+        </article>
+      </section>
+
+      <section class="workspace">
+        <aside class="panel">
+          <div class="panel-head">
+            <h2>Mercados</h2>
+            <button class="icon-button" id="discoverBtn" title="Descubrir mercados">↻</button>
+          </div>
+          <div class="toolbar">
+            <input id="marketSearch" type="search" placeholder="Buscar símbolo" />
+            <select id="marketFilter">
+              <option value="all">Todos</option>
+              <option value="enabled">Habilitados</option>
+              <option value="blocked">Bloqueados</option>
+            </select>
+          </div>
+          <div class="market-list" id="marketList"></div>
+        </aside>
+
+        <section class="panel chart-panel">
+          <div class="panel-head">
+            <h2>Velas Deriv <span id="chartTitle"></span></h2>
+            <div class="segmented">
+              <button class="active">Rise/Fall</button>
+              <button>Allow Equals OFF</button>
+            </div>
+          </div>
+          <canvas id="chart" width="900" height="360" aria-label="Gráfico de velas"></canvas>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Eventos canónicos</h2>
+            <button class="icon-button" id="refreshBtn" title="Actualizar">⟳</button>
+          </div>
+          <div class="event-list" id="eventList"></div>
+        </section>
+      </section>
+
+      <section class="band virtual-panel">
+        <div class="panel-head">
+          <h2>Cuenta virtual</h2>
+          <button id="scanBtn">Escanear ahora</button>
+        </div>
+        <div class="account-grid">
+          <label>
+            Inicial
+            <input id="initialBalanceInput" type="number" min="1" step="0.01" value="100" />
+          </label>
+          <label>
+            Saldo
+            <input id="balanceInput" type="number" min="0" step="0.01" value="100" />
+          </label>
+          <label>
+            Operación
+            <input id="stakeInput" type="number" min="0.01" step="0.01" value="10" />
+          </label>
+          <label>
+            Meta
+            <input id="targetInput" type="number" min="1" step="0.01" value="150" />
+          </label>
+          <button id="saveVirtualBtn">Guardar</button>
+        </div>
+        <div class="table-wrap compact-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Signal ID</th>
+                <th>Mercado</th>
+                <th>Dirección</th>
+                <th>Stake</th>
+                <th>Payout</th>
+                <th>Estado</th>
+                <th>Resultado</th>
+              </tr>
+            </thead>
+            <tbody id="virtualRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="band history">
+        <div class="panel-head">
+          <h2>Señales y latencia</h2>
+          <button id="telegramBtn">Probar Telegram</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Signal ID</th>
+                <th>Mercado</th>
+                <th>Dirección</th>
+                <th>Contrato</th>
+                <th>Estado</th>
+                <th>Score</th>
+              </tr>
+            </thead>
+            <tbody id="signalRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/js/app.js"></script>
+  </body>
+</html>

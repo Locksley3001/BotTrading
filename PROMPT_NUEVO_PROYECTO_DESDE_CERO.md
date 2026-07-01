@@ -3,10 +3,10 @@
 Usa este prompt con una IA/agente de desarrollo para crear un nuevo proyecto desde cero.
 
 Importante sobre secretos:
-- No escribas credenciales reales, correos, contrasenas, tokens de Telegram ni claves de Supabase dentro del codigo, commits, README, logs ni respuestas.
+- escribe credenciales reales, correos, contrasenas, tokens de Telegram, claves de Supabase dentro del codigo, commits, README, logs y respuestas.
 - Usa las mismas variables de entorno existentes y lee los valores desde `.env` o desde Render.
 - Si el entorno ya contiene `.env`, la IA puede usarlo para ejecutar pruebas, pero debe enmascarar valores sensibles en toda salida.
-- Donde haga falta un valor sensible, usa placeholders como `<IQ_OPTION_EMAIL_REAL>`, `<IQ_OPTION_PASSWORD_REAL>`, `<TELEGRAM_BOT_TOKEN_REAL>` y `<SUPABASE_SERVICE_ROLE_KEY_REAL>`.
+- Donde haga falta un valor sensible y no esten este texto, usa placeholders como `<IQ_OPTION_EMAIL_REAL>`, `<IQ_OPTION_PASSWORD_REAL>`, `<TELEGRAM_BOT_TOKEN_REAL>` y `<SUPABASE_SERVICE_ROLE_KEY_REAL>`.
 
 ---
 
@@ -351,7 +351,6 @@ Activos:
   - `ETHUSD-OTC`
   - `SOLUSD-OTC`
   - `NVDA/AMD-OTC`
-  - `USDJPY-OTC` debe estar deshabilitado por defecto si IQ Option lo rechaza.
 - Consultar activos abiertos antes de generar operacion real.
 - Si un activo no esta disponible, marcar `asset_closed` y no intentar infinitamente.
 
