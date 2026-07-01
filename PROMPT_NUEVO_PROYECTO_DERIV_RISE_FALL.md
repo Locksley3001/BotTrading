@@ -1,6 +1,6 @@
 # Prompt maestro para crear el bot nuevo en Deriv Rise/Fall
 
-Usa este prompt con una IA/agente de desarrollo para crear desde cero una nueva version del bot, migrada a Deriv, usando Rise/Fall sobre mercados no sinteticos. El proyecto puede usar el mismo proyecto Supabase existente como infraestructura, pero debe crear tablas/schema nuevos para Deriv; la base actual de IQ Option debe quedar solo como historico legacy o fuente opcional de consulta/migracion.
+Usa este prompt con una IA/agente de desarrollo para crear desde cero una nueva version del bot que encuentras en escritorio, en la carpeta trading-bot, migrada a Deriv, usando Rise/Fall sobre mercados no sinteticos. El proyecto puede usar el mismo proyecto Supabase existente como infraestructura, pero debe crear tablas/schema nuevos para Deriv; la base actual de IQ Option debe quedar solo como historico legacy o fuente opcional de consulta/migracion.
 
 Fecha de investigacion tecnica: 2026-07-01, America/Bogota.
 
