@@ -14,6 +14,7 @@ from app import __version__
 from app.config import ROOT_DIR, Settings, get_settings
 from app.deriv_adapter import DerivAPIError, DerivPublicClient
 from app.event_store import EventSink, LocalJsonlEventStore
+from app.learning import LearningService
 from app.live_engine import LiveMarketEngine
 from app.market_discovery import MarketDiscoveryService
 from app.models import Signal, SignalDirection, TradeEvent, TradeEventType
@@ -29,6 +30,7 @@ class AppState:
     deriv: DerivPublicClient
     telegram: TelegramNotifier
     virtual_account: VirtualAccountService
+    learning: LearningService
     engine: LiveMarketEngine
     last_error: str | None = None
 
@@ -45,6 +47,7 @@ async def lifespan(app: FastAPI):
     state.deriv = DerivPublicClient(settings)
     state.telegram = TelegramNotifier(settings, state.store)
     state.virtual_account = VirtualAccountService(settings, state.store)
+    state.learning = LearningService(settings, state.local_store, state.store)
     if not state.virtual_account.path.exists():
         await state.virtual_account.configure(
             initial_balance=settings.virtual_initial_balance,
@@ -59,6 +62,7 @@ async def lifespan(app: FastAPI):
         local_store=state.local_store,
         virtual_account=state.virtual_account,
         telegram=state.telegram,
+        learning=state.learning,
     )
     state.engine.broker_trading_enabled = settings.broker_trading_enabled
     state.engine.start()
@@ -138,6 +142,7 @@ async def api_state(settings: Annotated[Settings, Depends(settings_dep)]) -> dic
         "events": state.local_store.read_events(limit=50),
         "virtual_account": state.virtual_account.state.model_dump(mode="json"),
         "virtual_trades": state.local_store.read_virtual_trades(limit=100),
+        "learning": state.learning.read(),
         "live_engine": state.engine.status(),
     }
 
@@ -221,6 +226,16 @@ async def live_scan_once() -> dict[str, object]:
 async def live_settle_due() -> dict[str, object]:
     settled = await state.engine.settle_due_virtual_trades()
     return {"settled": [trade.model_dump(mode="json") for trade in settled]}
+
+
+@app.get("/api/learning")
+async def learning_state() -> dict[str, object]:
+    return state.learning.read()
+
+
+@app.post("/api/learning/rebuild")
+async def learning_rebuild() -> dict[str, object]:
+    return await state.learning.rebuild_from_virtual_trades()
 
 
 @app.get("/api/virtual-account")

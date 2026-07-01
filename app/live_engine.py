@@ -7,6 +7,7 @@ from typing import Any
 from app.config import Settings
 from app.deriv_adapter import DerivAPIError, DerivPublicClient, verify_longcode_mapping
 from app.event_store import EventSink, LocalJsonlEventStore
+from app.learning import LearningService
 from app.market_discovery import MarketDiscoveryService
 from app.models import (
     Candle,
@@ -33,6 +34,7 @@ class LiveMarketEngine:
         local_store: LocalJsonlEventStore,
         virtual_account: VirtualAccountService,
         telegram: TelegramNotifier,
+        learning: LearningService,
     ):
         self.settings = settings
         self.client = client
@@ -40,6 +42,7 @@ class LiveMarketEngine:
         self.local_store = local_store
         self.virtual_account = virtual_account
         self.telegram = telegram
+        self.learning = learning
         self.enabled = True
         self.last_scan_at: datetime | None = None
         self.last_error: str | None = None
@@ -354,6 +357,7 @@ class LiveMarketEngine:
                     balance_before_reset=balance_after_result,
                     triggering_signal_id=trade.signal_id,
                 )
+            await self.learning.rebuild_from_virtual_trades()
             await self._maybe_send_five_trade_summary()
             settled.append(settled_trade)
         return settled

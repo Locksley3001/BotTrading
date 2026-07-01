@@ -27,6 +27,30 @@ async def main() -> int:
         health = await store.healthcheck()
         lines.append(f"- Project reachable/auth accepted: {'OK' if health['project_reachable'] else 'FAILED'}")
         lines.append(f"- Legacy table `{health['legacy_table']}` HTTP status: {health['legacy_table_status']}")
+        exposed_legacy_table = "bot_state_file"
+        async with httpx.AsyncClient(timeout=settings.supabase_timeout_seconds) as client:
+            legacy_insert = await client.post(
+                f"{settings.supabase_url.rstrip()}/rest/v1/{exposed_legacy_table}",
+                headers=store.base_headers | {"Prefer": "return=representation"},
+                json={},
+            )
+            legacy_probe_id = None
+            if legacy_insert.status_code < 400:
+                legacy_payload = legacy_insert.json()
+                if legacy_payload:
+                    legacy_probe_id = legacy_payload[0].get("id")
+            legacy_read = None
+            legacy_delete = None
+            if legacy_probe_id is not None:
+                legacy_read = await client.get(
+                    f"{settings.supabase_url.rstrip()}/rest/v1/{exposed_legacy_table}?select=id,created_at&id=eq.{legacy_probe_id}",
+                    headers=store.base_headers,
+                )
+                legacy_delete = await client.delete(
+                    f"{settings.supabase_url.rstrip()}/rest/v1/{exposed_legacy_table}?id=eq.{legacy_probe_id}",
+                    headers=store.base_headers,
+                )
+        lines.append(f"- Exposed legacy table `{exposed_legacy_table}` write probe: {'OK' if legacy_insert.status_code == 201 and legacy_read and legacy_read.status_code == 200 and legacy_delete and legacy_delete.status_code == 200 else 'FAILED'}")
         lines.append(f"- Deriv table `{health['deriv_schema']}.{health['deriv_event_table']}` HTTP status: {health['deriv_table_status']}")
         lines.append(f"- Deriv schema ready for REST writes: {'OK' if health['deriv_ready'] else 'PENDING'}")
         if health.get("deriv_error"):

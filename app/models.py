@@ -39,6 +39,7 @@ class TradeEventType(StrEnum):
     VIRTUAL_ACCOUNT_RESET = "virtual_account_reset"
     VIRTUAL_TRADE_OPENED = "virtual_trade_opened"
     VIRTUAL_TRADE_SETTLED = "virtual_trade_settled"
+    LEARNING_UPDATED = "learning_updated"
     BROKER_TRADING_UPDATED = "broker_trading_updated"
     BROKER_TRADING_REJECTED = "broker_trading_rejected"
     ERROR = "error"
