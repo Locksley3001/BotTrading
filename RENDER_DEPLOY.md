@@ -3,7 +3,7 @@
 ## Build command
 
 ```bash
-pip install -r requirements.txt
+python -m pip install --upgrade pip && pip install -r requirements.txt
 ```
 
 ## Start command
@@ -13,6 +13,11 @@ uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
 ## Required environment
+
+Set Python explicitly. Render otherwise can pick a newer runtime that forces
+`pydantic-core` to compile from source.
+
+- `PYTHON_VERSION=3.12.8`
 
 Use `.env.example` as the source of truth. Keep these defaults unless you are deliberately enabling a gated test:
 
