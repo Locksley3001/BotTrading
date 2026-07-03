@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from typing import Annotated
+from urllib.parse import urlencode
 
 from pydantic import BaseModel
 
-from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
@@ -423,14 +424,174 @@ async def set_timeframe(timeframe: int) -> dict[str, object]:
 
 @app.get("/api/auth/deriv/login-url")
 async def deriv_login_url(settings: Annotated[Settings, Depends(settings_dep)]) -> dict[str, object]:
-    if not settings.deriv_client_id or not settings.deriv_redirect_uri:
-        return {"configured": False, "reason": "DERIV_CLIENT_ID and DERIV_REDIRECT_URI are required"}
-    return {"configured": False, "reason": "PKCE login scaffolding is documented; token exchange is not enabled without explicit OAuth client config."}
+    if not settings.deriv_app_id:
+        return {"configured": False, "reason": "DERIV_APP_ID is required"}
+    app_id = settings.deriv_app_id.get_secret_value()
+    return {
+        "configured": True,
+        "authorize_url": f"https://oauth.deriv.com/oauth2/authorize?{urlencode({'app_id': app_id})}",
+        "redirect_uri": settings.deriv_redirect_uri,
+        "callback": "/api/auth/deriv/callback",
+        "note": "Open authorize_url. Do not open the callback directly; Deriv redirects there after login.",
+    }
 
 
 @app.get("/api/auth/deriv/callback")
-async def deriv_callback() -> dict[str, object]:
-    return {"status": "not_configured"}
+async def deriv_callback(request: Request) -> HTMLResponse:
+    accounts = _deriv_oauth_accounts(dict(request.query_params))
+    login = await deriv_login_url(state.settings)
+    if not accounts:
+        authorize_url = login.get("authorize_url") if login.get("configured") else None
+        authorize_html = (
+            f'<a href="{_escape_html(str(authorize_url))}">Abrir login OAuth de Deriv</a>'
+            if authorize_url
+            else "Configura DERIV_APP_ID en Render y redeploy para generar la URL OAuth."
+        )
+        return HTMLResponse(
+            _deriv_callback_page(
+                title="Callback Deriv activo",
+                body=f"""
+                <p>Este endpoint ya esta funcionando, pero lo abriste directo y Deriv no envio cuentas ni tokens.</p>
+                <p>Para conectar la cuenta, abre la URL de autorizacion:</p>
+                <p>{authorize_html}</p>
+                <p>Tambien puedes ver la URL en <code>/api/auth/deriv/login-url</code>.</p>
+                """,
+            )
+        )
+
+    preferred = _preferred_deriv_account(accounts)
+    env_lines = "\n".join(
+        [
+            f"DERIV_ACCOUNT_ID={preferred['account_id']}",
+            f"DERIV_ACCESS_TOKEN={preferred['token']}",
+        ]
+    )
+    account_rows = "\n".join(
+        f"<tr><td>{_escape_html(account['account_id'])}</td><td>{_escape_html(account.get('currency') or '')}</td><td>{'Demo' if _is_demo_deriv_account(account['account_id']) else 'Real'}</td></tr>"
+        for account in accounts
+    )
+    return HTMLResponse(
+        _deriv_callback_page(
+            title="Deriv conectado",
+            body=f"""
+            <p>Deriv devolvio {len(accounts)} cuenta(s). Copia estas variables en Render y reinicia el servicio:</p>
+            <pre>{_escape_html(env_lines)}</pre>
+            <p>Cuenta recomendada: <strong>{_escape_html(preferred['account_id'])}</strong></p>
+            <table>
+              <thead><tr><th>Cuenta</th><th>Moneda</th><th>Tipo</th></tr></thead>
+              <tbody>{account_rows}</tbody>
+            </table>
+            <p>Despues prueba <code>/api/deriv/auth-check</code>.</p>
+            """,
+        )
+    )
+
+
+def _deriv_oauth_accounts(params: dict[str, str]) -> list[dict[str, str]]:
+    normalized = {key.lower(): value for key, value in params.items()}
+    accounts: list[dict[str, str]] = []
+    for index in range(1, 21):
+        account_id = normalized.get(f"acct{index}") or normalized.get(f"account{index}")
+        token = normalized.get(f"token{index}")
+        currency = normalized.get(f"cur{index}") or normalized.get(f"currency{index}") or ""
+        if account_id and token:
+            accounts.append({"account_id": account_id, "token": token, "currency": currency})
+    return accounts
+
+
+def _preferred_deriv_account(accounts: list[dict[str, str]]) -> dict[str, str]:
+    for account in accounts:
+        if _is_demo_deriv_account(account["account_id"]):
+            return account
+    return accounts[0]
+
+
+def _is_demo_deriv_account(account_id: str) -> bool:
+    return account_id.upper().startswith(("VRTC", "VRW"))
+
+
+def _escape_html(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#039;")
+    )
+
+
+def _deriv_callback_page(*, title: str, body: str) -> str:
+    return f"""<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{_escape_html(title)}</title>
+    <style>
+      body {{
+        margin: 0;
+        background: #f7f8fa;
+        color: #18202a;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }}
+      main {{
+        max-width: 920px;
+        margin: 48px auto;
+        padding: 0 20px;
+      }}
+      section {{
+        background: #fff;
+        border: 1px solid #d9dee7;
+        border-radius: 8px;
+        padding: 22px;
+      }}
+      h1 {{
+        margin: 0 0 12px;
+        font-size: 24px;
+      }}
+      p {{
+        line-height: 1.5;
+      }}
+      code,
+      pre {{
+        background: #111827;
+        color: #f9fafb;
+        border-radius: 6px;
+      }}
+      code {{
+        padding: 2px 6px;
+      }}
+      pre {{
+        overflow: auto;
+        padding: 14px;
+        white-space: pre-wrap;
+      }}
+      table {{
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 16px;
+      }}
+      th,
+      td {{
+        border-top: 1px solid #d9dee7;
+        padding: 10px 8px;
+        text-align: left;
+      }}
+      a {{
+        color: #0f766e;
+        font-weight: 700;
+      }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <section>
+        <h1>{_escape_html(title)}</h1>
+        {body}
+      </section>
+    </main>
+  </body>
+</html>"""
 
 
 @app.websocket("/ws")
