@@ -40,6 +40,10 @@ class TradeEventType(StrEnum):
     VIRTUAL_TRADE_OPENED = "virtual_trade_opened"
     VIRTUAL_TRADE_SETTLED = "virtual_trade_settled"
     LEARNING_UPDATED = "learning_updated"
+    LEARNING_FILTER_ALLOWED = "learning_filter_allowed"
+    LEARNING_FILTER_BLOCKED = "learning_filter_blocked"
+    LEARNING_SHADOW_OPENED = "learning_shadow_opened"
+    LEARNING_SHADOW_SETTLED = "learning_shadow_settled"
     BROKER_TRADING_UPDATED = "broker_trading_updated"
     BROKER_TRADING_REJECTED = "broker_trading_rejected"
     ERROR = "error"
@@ -178,6 +182,8 @@ class VirtualTradeStatus(StrEnum):
     OPEN = "open"
     SETTLED = "settled"
     SKIPPED = "skipped"
+    SHADOW_OPEN = "shadow_open"
+    SHADOW_SETTLED = "shadow_settled"
 
 
 class VirtualAccountState(BaseModel):
@@ -211,6 +217,8 @@ class VirtualTrade(BaseModel):
     settled_at: datetime | None = None
     resolution_source: str = "virtual_tick_replay"
     broker_contract_id: str | None = None
+    shadow_reason: str | None = None
+    learning_decision: dict[str, Any] = Field(default_factory=dict)
 
 
 class TelegramEvent(BaseModel):

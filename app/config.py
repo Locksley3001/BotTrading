@@ -14,8 +14,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 
 def _load_env_files() -> None:
     """Load local env files without requiring one canonical filename."""
-    load_dotenv(ROOT_DIR / ".env", override=False)
-    load_dotenv(ROOT_DIR / ".env.txt", override=False)
+    load_dotenv(ROOT_DIR / ".env", override=False, encoding="utf-8-sig")
+    load_dotenv(ROOT_DIR / ".env.txt", override=False, encoding="utf-8-sig")
 
 
 def _csv(value: str | list[str] | None) -> list[str]:
@@ -49,8 +49,14 @@ class Settings(BaseSettings):
         default="wss://api.derivws.com/trading/v1/options/ws/public",
         alias="DERIV_PUBLIC_WS_URL",
     )
+    deriv_authenticated_ws_url: str = Field(
+        default="wss://ws.derivws.com/websockets/v3",
+        alias="DERIV_AUTHENTICATED_WS_URL",
+    )
     deriv_rest_base_url: str = Field(default="https://api.derivws.com", alias="DERIV_REST_BASE_URL")
     deriv_auth_base_url: str = Field(default="https://auth.deriv.com", alias="DERIV_AUTH_BASE_URL")
+    deriv_email: SecretStr | None = Field(default=None, alias="DERIV_EMAIL")
+    deriv_password: SecretStr | None = Field(default=None, alias="DERIV_PASSWORD")
     deriv_app_id: SecretStr | None = Field(default=None, alias="DERIV_APP_ID")
     deriv_client_id: SecretStr | None = Field(default=None, alias="DERIV_CLIENT_ID")
     deriv_redirect_uri: str | None = Field(default=None, alias="DERIV_REDIRECT_URI")
@@ -98,6 +104,33 @@ class Settings(BaseSettings):
     deriv_max_stake: float = Field(default=10000.0, alias="DERIV_MAX_STAKE")
     deriv_min_payout_rate: float = Field(default=0.65, alias="DERIV_MIN_PAYOUT_RATE")
     deriv_proposal_max_age_ms: int = Field(default=1500, alias="DERIV_PROPOSAL_MAX_AGE_MS")
+
+    learning_filter_enabled: bool = Field(default=True, alias="LEARNING_FILTER_ENABLED")
+    learning_shadow_enabled: bool = Field(default=True, alias="LEARNING_SHADOW_ENABLED")
+    learning_warmup_samples: int = Field(default=18, alias="LEARNING_WARMUP_SAMPLES")
+    learning_min_rule_samples: int = Field(default=8, alias="LEARNING_MIN_RULE_SAMPLES")
+    learning_strong_rule_samples: int = Field(default=12, alias="LEARNING_STRONG_RULE_SAMPLES")
+    learning_block_win_rate_below: float = Field(default=49.0, alias="LEARNING_BLOCK_WIN_RATE_BELOW")
+    learning_block_avg_profit_below: float = Field(default=0.0, alias="LEARNING_BLOCK_AVG_PROFIT_BELOW")
+    learning_block_net_profit_below: float = Field(default=0.0, alias="LEARNING_BLOCK_NET_PROFIT_BELOW")
+    learning_block_bad_weight: float = Field(default=2.35, alias="LEARNING_BLOCK_BAD_WEIGHT")
+    learning_critical_win_rate_below: float = Field(default=42.0, alias="LEARNING_CRITICAL_WIN_RATE_BELOW")
+    learning_critical_bad_weight: float = Field(default=1.25, alias="LEARNING_CRITICAL_BAD_WEIGHT")
+    learning_allow_win_rate_at_least: float = Field(default=57.0, alias="LEARNING_ALLOW_WIN_RATE_AT_LEAST")
+    learning_allow_min_avg_profit: float = Field(default=0.0, alias="LEARNING_ALLOW_MIN_AVG_PROFIT")
+    learning_allow_good_weight: float = Field(default=1.45, alias="LEARNING_ALLOW_GOOD_WEIGHT")
+    learning_warning_bad_weight: float = Field(default=1.25, alias="LEARNING_WARNING_BAD_WEIGHT")
+    learning_score_boost: int = Field(default=1, alias="LEARNING_SCORE_BOOST")
+    learning_score_penalty: int = Field(default=1, alias="LEARNING_SCORE_PENALTY")
+    learning_weight_global: float = Field(default=0.35, alias="LEARNING_WEIGHT_GLOBAL")
+    learning_weight_asset: float = Field(default=0.75, alias="LEARNING_WEIGHT_ASSET")
+    learning_weight_direction: float = Field(default=0.45, alias="LEARNING_WEIGHT_DIRECTION")
+    learning_weight_asset_direction: float = Field(default=1.35, alias="LEARNING_WEIGHT_ASSET_DIRECTION")
+    learning_weight_contract: float = Field(default=0.45, alias="LEARNING_WEIGHT_CONTRACT")
+    learning_weight_reason: float = Field(default=0.85, alias="LEARNING_WEIGHT_REASON")
+    learning_weight_score_band: float = Field(default=0.65, alias="LEARNING_WEIGHT_SCORE_BAND")
+    learning_weight_factor_score: float = Field(default=0.35, alias="LEARNING_WEIGHT_FACTOR_SCORE")
+    learning_weight_asset_reason: float = Field(default=1.25, alias="LEARNING_WEIGHT_ASSET_REASON")
 
     markets: list[str] = Field(
         default_factory=lambda: ["frxXAUUSD", "frxXAGUSD", "frxEURUSD", "frxGBPUSD", "frxUSDJPY", "frxAUDUSD"],
@@ -170,6 +203,38 @@ class Settings(BaseSettings):
     def parse_csv(cls, value: str | list[str] | None) -> list[str]:
         return _csv(value)
 
+    @field_validator(
+        "deriv_email",
+        "deriv_password",
+        "deriv_app_id",
+        "deriv_client_id",
+        "deriv_account_id",
+        "deriv_access_token",
+        "deriv_refresh_token",
+        "deriv_legacy_api_token",
+        "telegram_bot_token",
+        "telegram_chat_id",
+        "supabase_secret_key",
+        "supabase_service_role_key",
+        "supabase_service_key",
+        "supabase_key",
+        "supabase_anon_key",
+        mode="before",
+    )
+    @classmethod
+    def empty_secret_to_none(cls, value: object) -> object | None:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @property
+    def deriv_authorization_token(self) -> SecretStr | None:
+        return self.deriv_access_token or self.deriv_legacy_api_token
+
+    @property
+    def deriv_auth_ready_for_authorize(self) -> bool:
+        return bool(self.deriv_app_id and self.deriv_authorization_token)
+
     @property
     def supabase_server_key(self) -> SecretStr | None:
         return (
@@ -185,6 +250,28 @@ class Settings(BaseSettings):
         if self.deriv_api_profile == "legacy_token":
             return bool(self.deriv_app_id and self.deriv_legacy_api_token)
         return bool(self.deriv_app_id and self.deriv_access_token and self.deriv_account_id)
+
+    def deriv_auth_requirements(self) -> dict[str, object]:
+        missing: list[str] = []
+        if not self.deriv_app_id:
+            missing.append("DERIV_APP_ID")
+        if not self.deriv_authorization_token:
+            missing.append("DERIV_ACCESS_TOKEN or DERIV_LEGACY_API_TOKEN")
+        if self.deriv_api_profile == "current_oauth" and not self.deriv_account_id:
+            missing.append("DERIV_ACCOUNT_ID")
+        return {
+            "ready_for_authorize": self.deriv_auth_ready_for_authorize,
+            "ready_for_trading_config": self.auth_configured,
+            "missing": missing,
+            "token_source": "DERIV_ACCESS_TOKEN"
+            if self.deriv_access_token
+            else "DERIV_LEGACY_API_TOKEN"
+            if self.deriv_legacy_api_token
+            else None,
+            "email_password_present": bool(self.deriv_email and self.deriv_password),
+            "email_password_supported_for_api": False,
+            "note": "Deriv API authentication requires an app id plus an authorization token; email/password is not used by this bot.",
+        }
 
     @property
     def demo_buy_tests_allowed(self) -> bool:
@@ -214,8 +301,12 @@ class Settings(BaseSettings):
             "deriv_account_mode": self.deriv_account_mode,
             "deriv_public_ws_url_configured": bool(self.deriv_public_ws_url),
             "deriv_auth_configured": self.auth_configured,
+            "deriv_auth_ready_for_authorize": self.deriv_auth_ready_for_authorize,
+            "deriv_auth_requirements": self.deriv_auth_requirements(),
             "supabase_configured": bool(self.supabase_url and self.supabase_server_key),
             "telegram_configured": bool(self.telegram_bot_token and self.telegram_chat_id),
+            "learning_filter_enabled": self.learning_filter_enabled,
+            "learning_shadow_enabled": self.learning_shadow_enabled,
         }
 
 

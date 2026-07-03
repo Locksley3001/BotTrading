@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import __version__
 from app.config import ROOT_DIR, Settings, get_settings
-from app.deriv_adapter import DerivAPIError, DerivPublicClient
+from app.deriv_adapter import DerivAPIError, DerivAuthenticatedClient, DerivPublicClient, safe_authorize_payload
 from app.event_store import EventSink, LocalJsonlEventStore
 from app.learning import LearningService
 from app.live_engine import LiveMarketEngine
@@ -28,6 +28,7 @@ class AppState:
     store: EventSink
     local_store: LocalJsonlEventStore
     deriv: DerivPublicClient
+    deriv_auth: DerivAuthenticatedClient
     telegram: TelegramNotifier
     virtual_account: VirtualAccountService
     learning: LearningService
@@ -45,6 +46,7 @@ async def lifespan(app: FastAPI):
     state.local_store = LocalJsonlEventStore(settings.data_dir)
     state.store = await make_event_store(settings)
     state.deriv = DerivPublicClient(settings)
+    state.deriv_auth = DerivAuthenticatedClient(settings)
     state.telegram = TelegramNotifier(settings, state.store)
     state.virtual_account = VirtualAccountService(settings, state.store)
     state.learning = LearningService(settings, state.local_store, state.store)
@@ -118,7 +120,11 @@ async def health(settings: Annotated[Settings, Depends(settings_dep)]) -> dict[s
         "strategy_version": "cci20-price-action-deriv-0.1",
         "migration_version": "001_deriv_schema",
         "public_ws": {"connected": public_ok, "latency_ms": public_latency_ms},
-        "auth_ws": {"connected": False, "configured": settings.auth_configured},
+        "auth_ws": {
+            "connected": False,
+            "configured": settings.auth_configured,
+            **settings.deriv_auth_requirements(),
+        },
         "supabase": {
             "configured": bool(settings.supabase_url and settings.supabase_server_key),
             "connected": supabase_connected,
@@ -143,6 +149,7 @@ async def api_state(settings: Annotated[Settings, Depends(settings_dep)]) -> dic
         "virtual_account": state.virtual_account.state.model_dump(mode="json"),
         "virtual_trades": state.local_store.read_virtual_trades(limit=100),
         "learning": state.learning.read(),
+        "learning_summary": state.learning.summary(),
         "live_engine": state.engine.status(),
     }
 
@@ -212,6 +219,77 @@ async def verify_contracts() -> dict[str, object]:
     return await market_discovery()
 
 
+@app.get("/api/deriv/auth-check")
+async def deriv_auth_check() -> dict[str, object]:
+    requirements = state.settings.deriv_auth_requirements()
+    if not requirements["ready_for_authorize"]:
+        return {
+            "ok": False,
+            "configured": False,
+            "connected": False,
+            "requirements": requirements,
+        }
+    try:
+        result = await state.deriv_auth.authorize()
+    except DerivAPIError as exc:
+        return {
+            "ok": False,
+            "configured": True,
+            "connected": False,
+            "error_code": exc.code,
+            "error": str(exc),
+            "requirements": requirements,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "configured": True,
+            "connected": False,
+            "error_code": type(exc).__name__,
+            "error": "Deriv authenticated connection failed",
+            "requirements": requirements,
+        }
+    return {
+        "ok": True,
+        "configured": True,
+        "connected": True,
+        "latency_ms": round(result.latency_ms, 2),
+        "account": safe_authorize_payload(result.response),
+        "requirements": requirements,
+    }
+
+
+@app.get("/api/deriv/balance")
+async def deriv_balance() -> dict[str, object]:
+    requirements = state.settings.deriv_auth_requirements()
+    if not requirements["ready_for_authorize"]:
+        return {
+            "ok": False,
+            "configured": False,
+            "connected": False,
+            "requirements": requirements,
+        }
+    try:
+        result = await state.deriv_auth.balance()
+    except DerivAPIError as exc:
+        return {
+            "ok": False,
+            "configured": True,
+            "connected": False,
+            "error_code": exc.code,
+            "error": str(exc),
+            "requirements": requirements,
+        }
+    return {
+        "ok": True,
+        "configured": True,
+        "connected": True,
+        "latency_ms": round(result.latency_ms, 2),
+        "balance": result.response.get("balance") or {},
+        "requirements": requirements,
+    }
+
+
 @app.get("/api/live/status")
 async def live_status() -> dict[str, object]:
     return state.engine.status()
@@ -231,6 +309,11 @@ async def live_settle_due() -> dict[str, object]:
 @app.get("/api/learning")
 async def learning_state() -> dict[str, object]:
     return state.learning.read()
+
+
+@app.get("/api/learning/summary")
+async def learning_summary() -> dict[str, object]:
+    return state.learning.summary()
 
 
 @app.post("/api/learning/rebuild")

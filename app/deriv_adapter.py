@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
+from urllib.parse import urlencode
 
 import websockets
 
@@ -160,6 +161,102 @@ class DerivPublicClient:
             }
         )
         return response.response.get("candles", [])
+
+
+class DerivAuthenticatedClient:
+    """Authenticated Deriv WebSocket client using an OAuth/PAT authorization token."""
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self._req_id = 0
+
+    def next_req_id(self) -> int:
+        self._req_id += 1
+        return self._req_id
+
+    def websocket_url(self) -> str:
+        if not self.settings.deriv_app_id:
+            raise DerivAPIError("DERIV_APP_ID is required", code="missing_deriv_app_id")
+        app_id = self.settings.deriv_app_id.get_secret_value()
+        separator = "&" if "?" in self.settings.deriv_authenticated_ws_url else "?"
+        return f"{self.settings.deriv_authenticated_ws_url}{separator}{urlencode({'app_id': app_id})}"
+
+    def authorization_token(self) -> str:
+        token = self.settings.deriv_authorization_token
+        if not token:
+            raise DerivAPIError(
+                "DERIV_ACCESS_TOKEN or DERIV_LEGACY_API_TOKEN is required",
+                code="missing_deriv_authorization_token",
+            )
+        return token.get_secret_value()
+
+    async def authorize(self, timeout: float = 15.0) -> WSResult:
+        return await self._authorized_request(None, timeout=timeout)
+
+    async def balance(self, timeout: float = 15.0) -> WSResult:
+        return await self._authorized_request({"balance": 1}, timeout=timeout)
+
+    async def _authorized_request(self, payload: dict[str, Any] | None, timeout: float) -> WSResult:
+        url = self.websocket_url()
+        auth_payload = {"authorize": self.authorization_token(), "req_id": self.next_req_id()}
+        started = perf_counter()
+        async with websockets.connect(
+            url,
+            ping_interval=20,
+            close_timeout=5,
+            max_size=2**23,
+        ) as ws:
+            await ws.send(json.dumps(auth_payload))
+            authorize_raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
+            authorize_response = json.loads(authorize_raw)
+            if "error" in authorize_response:
+                error = authorize_response["error"] or {}
+                raise DerivAPIError(
+                    error.get("message", "Deriv authorization failed"),
+                    code=error.get("code"),
+                    payload=authorize_response,
+                )
+            if payload is None:
+                latency_ms = (perf_counter() - started) * 1000
+                return WSResult(request={"authorize": "***"}, response=authorize_response, latency_ms=latency_ms)
+
+            request_payload = dict(payload)
+            request_payload.setdefault("req_id", self.next_req_id())
+            await ws.send(json.dumps(request_payload))
+            raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
+
+        latency_ms = (perf_counter() - started) * 1000
+        response = json.loads(raw)
+        if "error" in response:
+            error = response["error"] or {}
+            raise DerivAPIError(
+                error.get("message", "Deriv API error"),
+                code=error.get("code"),
+                payload=response,
+            )
+        return WSResult(request=payload or {}, response=response, latency_ms=latency_ms)
+
+
+def safe_authorize_payload(response: dict[str, Any]) -> dict[str, Any]:
+    authorize = response.get("authorize") or {}
+    return {
+        "loginid": authorize.get("loginid"),
+        "currency": authorize.get("currency"),
+        "country": authorize.get("country"),
+        "balance": authorize.get("balance"),
+        "is_virtual": authorize.get("is_virtual"),
+        "landing_company_name": authorize.get("landing_company_name"),
+        "scopes": authorize.get("scopes") or [],
+        "account_list": [
+            {
+                "loginid": account.get("loginid"),
+                "currency": account.get("currency"),
+                "is_virtual": account.get("is_virtual"),
+            }
+            for account in authorize.get("account_list", []) or []
+            if isinstance(account, dict)
+        ],
+    }
 
 
 def _float_or_none(value: Any) -> float | None:

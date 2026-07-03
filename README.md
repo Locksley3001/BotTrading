@@ -37,6 +37,23 @@ Las pruebas públicas de Deriv no compran. Las pruebas autenticadas quedan bloqu
 
 Aplicar `supabase/migrations/001_deriv_schema.sql` en el SQL editor de Supabase o mediante la CLI del proyecto. Después, exponer el schema `deriv` en Supabase API settings para que PostgREST acepte `Accept-Profile: deriv`. La service role key permite operar por REST, pero no debe usarse desde el frontend ni para intentar DDL arbitrario desde el backend.
 
+## Conexion autenticada Deriv
+
+Para conectar una cuenta Deriv por API no se usa correo/contrasena. El bot solo acepta autenticacion oficial por token:
+
+- `DERIV_APP_ID`: app id creado en Deriv API.
+- `DERIV_ACCESS_TOKEN`: token OAuth/JWT o PAT con permisos necesarios.
+- `DERIV_ACCOUNT_ID`: login id de la cuenta demo/real que quieres auditar u operar.
+- Alternativa legacy: `DERIV_API_PROFILE=legacy_token` y `DERIV_LEGACY_API_TOKEN`.
+
+Diagnostico local:
+
+```bash
+curl http://127.0.0.1:8000/api/deriv/auth-check
+```
+
+Ese endpoint indica que variable falta y, cuando este configurado, ejecuta `authorize` contra Deriv sin exponer secretos.
+
 ## Endpoints principales
 
 - `GET /health`
@@ -44,6 +61,7 @@ Aplicar `supabase/migrations/001_deriv_schema.sql` en el SQL editor de Supabase 
 - `GET /api/events?signal_id=...`
 - `GET /api/signals`
 - `GET /api/performance`
+- `GET /api/deriv/auth-check`
 - `GET /api/deriv/market-catalog`
 - `POST /api/deriv/market-discovery`
 - `POST /api/deriv/verify-contracts`

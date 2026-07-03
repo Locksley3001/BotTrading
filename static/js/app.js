@@ -4,6 +4,7 @@ const state = {
   events: [],
   virtualAccount: null,
   virtualTrades: [],
+  learningSummary: null,
   selectedSymbol: null,
   brokerEnabled: false,
   candles: [],
@@ -20,6 +21,20 @@ const els = {
   virtualBalance: document.querySelector("#virtualBalance"),
   virtualTargets: document.querySelector("#virtualTargets"),
   virtualBankruptcies: document.querySelector("#virtualBankruptcies"),
+  learningState: document.querySelector("#learningState"),
+  learningTotalOps: document.querySelector("#learningTotalOps"),
+  learningWins: document.querySelector("#learningWins"),
+  learningLosses: document.querySelector("#learningLosses"),
+  learningWinRate: document.querySelector("#learningWinRate"),
+  learningAllowed: document.querySelector("#learningAllowed"),
+  learningBlocked: document.querySelector("#learningBlocked"),
+  learningRules: document.querySelector("#learningRules"),
+  shadowTotalOps: document.querySelector("#shadowTotalOps"),
+  shadowWins: document.querySelector("#shadowWins"),
+  shadowLosses: document.querySelector("#shadowLosses"),
+  shadowWinRate: document.querySelector("#shadowWinRate"),
+  shadowOpen: document.querySelector("#shadowOpen"),
+  shadowBlocked: document.querySelector("#shadowBlocked"),
   marketList: document.querySelector("#marketList"),
   eventList: document.querySelector("#eventList"),
   signalRows: document.querySelector("#signalRows"),
@@ -64,11 +79,13 @@ async function refresh() {
   state.events = appState.events || [];
   state.virtualAccount = appState.virtual_account;
   state.virtualTrades = appState.virtual_trades || [];
+  state.learningSummary = appState.learning_summary || null;
   if (!state.selectedSymbol && state.markets.length) {
     const enabled = state.markets.find((market) => market.enabled);
     state.selectedSymbol = enabled?.symbol || state.markets[0].symbol;
   }
   updateVirtualControls();
+  updateLearningSummary();
   renderMarkets();
   renderEvents();
   renderSignals();
@@ -172,6 +189,28 @@ function updateVirtualControls() {
   els.targetInput.value = account.target_balance;
 }
 
+function updateLearningSummary() {
+  const summary = state.learningSummary || {};
+  const operations = summary.operations || {};
+  const decisions = summary.learning_decisions || {};
+  const shadows = summary.shadows || {};
+  const config = summary.config || {};
+  els.learningState.textContent = config.enabled ? "ON" : "OFF";
+  els.learningTotalOps.textContent = String(operations.total || 0);
+  els.learningWins.textContent = String(operations.wins || 0);
+  els.learningLosses.textContent = String(operations.losses || 0);
+  els.learningWinRate.textContent = formatPercent(operations.win_rate);
+  els.learningAllowed.textContent = String(decisions.allowed || 0);
+  els.learningBlocked.textContent = String(decisions.blocked || 0);
+  els.learningRules.textContent = String(summary.rules_count || 0);
+  els.shadowTotalOps.textContent = String(shadows.total || 0);
+  els.shadowWins.textContent = String(shadows.wins || 0);
+  els.shadowLosses.textContent = String(shadows.losses || 0);
+  els.shadowWinRate.textContent = formatPercent(shadows.win_rate);
+  els.shadowOpen.textContent = String(shadows.open || 0);
+  els.shadowBlocked.textContent = String(shadows.opened_by_learning_block || 0);
+}
+
 async function loadCandlesForSelected() {
   if (!state.selectedSymbol) {
     drawMockChart();
@@ -258,6 +297,10 @@ function escapeHtml(value) {
 
 function formatMoney(value) {
   return Number(value || 0).toFixed(2);
+}
+
+function formatPercent(value) {
+  return `${Number(value || 0).toFixed(2)}%`;
 }
 
 els.discoverBtn.addEventListener("click", async () => {

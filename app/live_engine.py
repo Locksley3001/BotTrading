@@ -14,6 +14,7 @@ from app.models import (
     Outcome,
     Signal,
     SignalDirection,
+    SignalStatus,
     TradeEvent,
     TradeEventType,
     VirtualTrade,
@@ -162,6 +163,73 @@ class LiveMarketEngine:
         )
         duration = int(market.get("duration") or self.settings.deriv_default_duration)
         duration_unit = str(market.get("duration_unit") or self.settings.deriv_default_duration_unit)
+        base_signal_score = max(7, score)
+        learning_decision = self.learning.evaluate_signal(
+            asset=symbol,
+            direction=direction.value,
+            contract_type=contract_type,
+            reason=reason,
+            score=base_signal_score,
+            factor_score=factor_score,
+        )
+        analysis["learning"] = {
+            "action": learning_decision["action"],
+            "verdict": learning_decision["verdict"],
+            "reason": learning_decision["reason"],
+            "score_delta": learning_decision["score_delta"],
+            "adjusted_score": learning_decision["adjusted_score"],
+        }
+        if learning_decision["action"] == "block":
+            signal = Signal(
+                asset=symbol,
+                display_name=market.get("display_name"),
+                market=str(market.get("market") or ""),
+                direction=direction,
+                contract_type=contract_type,
+                duration=duration,
+                duration_unit=duration_unit,
+                timeframe=self.settings.default_timeframe,
+                score=int(learning_decision["adjusted_score"]),
+                factor_score=factor_score,
+                stake=self.virtual_account.state.stake,
+                status=SignalStatus.SHADOW,
+                reason=reason,
+            )
+            await self.store.upsert_signal(signal)
+            await self.store.append_event(
+                TradeEvent(
+                    signal_id=signal.signal_id,
+                    event_type=TradeEventType.SIGNAL_DECIDED,
+                    idempotency_key=f"signal_decided:{signal.signal_id}",
+                    asset=signal.asset,
+                    market=signal.market,
+                    payload={**signal.model_dump(mode="json"), "learning_decision": learning_decision},
+                )
+            )
+            await self.store.append_event(
+                TradeEvent(
+                    signal_id=signal.signal_id,
+                    event_type=TradeEventType.LEARNING_FILTER_BLOCKED,
+                    idempotency_key=f"learning_filter_blocked:{signal.signal_id}",
+                    asset=signal.asset,
+                    market=signal.market,
+                    payload=learning_decision,
+                )
+            )
+            if self.settings.learning_shadow_enabled and latest:
+                entry_epoch = int(datetime.now(UTC).timestamp())
+                await self._open_learning_shadow_trade(
+                    signal=signal,
+                    entry_spot=latest.close,
+                    entry_epoch=entry_epoch,
+                    expiry_epoch=entry_epoch + _duration_seconds(duration, duration_unit),
+                    learning_decision=learning_decision,
+                )
+            self.last_signal_epoch[symbol] = int(datetime.now(UTC).timestamp())
+            analysis["blocked_reason"] = "learning_filter"
+            analysis["signal_id"] = signal.signal_id
+            return analysis
+
         try:
             proposal = await self.client.proposal(
                 symbol=symbol,
@@ -199,7 +267,7 @@ class LiveMarketEngine:
             duration=duration,
             duration_unit=duration_unit,
             timeframe=self.settings.default_timeframe,
-            score=max(7, score),
+            score=int(learning_decision["adjusted_score"]),
             factor_score=factor_score,
             stake=self.virtual_account.state.stake,
             reason=reason,
@@ -212,7 +280,17 @@ class LiveMarketEngine:
                 idempotency_key=f"signal_decided:{signal.signal_id}",
                 asset=signal.asset,
                 market=signal.market,
-                payload=signal.model_dump(mode="json"),
+                payload={**signal.model_dump(mode="json"), "learning_decision": learning_decision},
+            )
+        )
+        await self.store.append_event(
+            TradeEvent(
+                signal_id=signal.signal_id,
+                event_type=TradeEventType.LEARNING_FILTER_ALLOWED,
+                idempotency_key=f"learning_filter_allowed:{signal.signal_id}",
+                asset=signal.asset,
+                market=signal.market,
+                payload=learning_decision,
             )
         )
         await self.store.append_event(
@@ -270,6 +348,46 @@ class LiveMarketEngine:
         analysis["signal_id"] = signal.signal_id
         return analysis
 
+    async def _open_learning_shadow_trade(
+        self,
+        *,
+        signal: Signal,
+        entry_spot: float,
+        entry_epoch: int,
+        expiry_epoch: int,
+        learning_decision: dict[str, Any],
+    ) -> VirtualTrade:
+        payout_rate = self.settings.virtual_payout_rate
+        trade = VirtualTrade(
+            signal_id=signal.signal_id,
+            asset=signal.asset,
+            market=signal.market,
+            direction=signal.direction,
+            contract_type=signal.contract_type,
+            stake=signal.stake,
+            payout=round(signal.stake * (1 + payout_rate), 8),
+            payout_rate=payout_rate,
+            entry_spot=entry_spot,
+            entry_epoch=entry_epoch,
+            expiry_epoch=expiry_epoch,
+            status=VirtualTradeStatus.SHADOW_OPEN,
+            resolution_source="learning_shadow_tick_replay",
+            shadow_reason="learning_filter",
+            learning_decision=learning_decision,
+        )
+        await self.store.upsert_virtual_trade(trade)
+        await self.store.append_event(
+            TradeEvent(
+                signal_id=signal.signal_id,
+                event_type=TradeEventType.LEARNING_SHADOW_OPENED,
+                idempotency_key=f"learning_shadow_opened:{signal.signal_id}",
+                asset=signal.asset,
+                market=signal.market,
+                payload={"trade": trade.model_dump(mode="json"), "learning_decision": learning_decision},
+            )
+        )
+        return trade
+
     async def _proposal_blocked(
         self,
         symbol: str,
@@ -326,10 +444,28 @@ class LiveMarketEngine:
         settled: list[VirtualTrade] = []
         for row in rows:
             trade = VirtualTrade.model_validate(row)
-            if trade.status != VirtualTradeStatus.OPEN or trade.expiry_epoch > now_epoch:
+            if trade.status not in {VirtualTradeStatus.OPEN, VirtualTradeStatus.SHADOW_OPEN} or trade.expiry_epoch > now_epoch:
                 continue
             exit_spot = await self._exit_spot(trade.asset, trade.expiry_epoch)
             outcome = resolve_strict_rise_fall(trade.direction, trade.entry_spot, exit_spot)
+            if trade.status == VirtualTradeStatus.SHADOW_OPEN:
+                trade.status = VirtualTradeStatus.SHADOW_SETTLED
+                trade.outcome = outcome
+                trade.exit_spot = exit_spot
+                trade.settled_at = datetime.now(UTC)
+                await self.store.upsert_virtual_trade(trade)
+                await self.store.append_event(
+                    TradeEvent(
+                        signal_id=trade.signal_id,
+                        event_type=TradeEventType.LEARNING_SHADOW_SETTLED,
+                        idempotency_key=f"learning_shadow_settled:{trade.signal_id}",
+                        asset=trade.asset,
+                        market=trade.market,
+                        payload={"trade": trade.model_dump(mode="json")},
+                    )
+                )
+                settled.append(trade)
+                continue
             target_hits_before = self.virtual_account.state.target_hits
             bankruptcies_before = self.virtual_account.state.bankruptcies
             balance_before_settle = self.virtual_account.state.balance

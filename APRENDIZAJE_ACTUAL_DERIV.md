@@ -320,3 +320,115 @@ y tiene N muestras.
 Eso ya permite saber qué mercados, direcciones y patrones están funcionando mejor en Deriv.
 
 La mejora real vendrá cuando esas reglas empiecen a influir en la decisión de abrir o bloquear nuevas operaciones.
+
+## Actualizacion aplicada: aprendizaje como filtro real
+
+Lo que faltaba para que el aprendizaje funcionara de verdad era que dejara de ser solo un reporte y entrara en el flujo vivo antes de abrir una operacion. Ya se agrego ese paso:
+
+```text
+estrategia detecta senal
+-> se calculan las llaves de aprendizaje
+-> se revisan reglas con suficientes muestras
+-> se ponderan reglas buenas y malas
+-> se permite, favorece, advierte o bloquea
+-> si bloquea, se registra una sombra para medir si el bloqueo fue correcto
+```
+
+El filtro ahora evalua estas familias:
+
+- `global`
+- `asset`
+- `direction`
+- `asset_direction`
+- `contract`
+- `reason`
+- `score_band`
+- `factor_score`
+- `asset_reason`
+
+No todas pesan igual. Las reglas mas especificas, como `asset_direction` y `asset_reason`, pesan mas que reglas generales como `global`.
+
+## Variables para endurecer o aflojar
+
+Estas variables se pueden ajustar desde `.env` sin tocar codigo:
+
+```text
+LEARNING_FILTER_ENABLED=true
+LEARNING_SHADOW_ENABLED=true
+LEARNING_WARMUP_SAMPLES=18
+LEARNING_MIN_RULE_SAMPLES=8
+LEARNING_STRONG_RULE_SAMPLES=12
+LEARNING_BLOCK_WIN_RATE_BELOW=49
+LEARNING_BLOCK_AVG_PROFIT_BELOW=0
+LEARNING_BLOCK_NET_PROFIT_BELOW=0
+LEARNING_BLOCK_BAD_WEIGHT=2.35
+LEARNING_CRITICAL_WIN_RATE_BELOW=42
+LEARNING_CRITICAL_BAD_WEIGHT=1.25
+LEARNING_ALLOW_WIN_RATE_AT_LEAST=57
+LEARNING_ALLOW_MIN_AVG_PROFIT=0
+LEARNING_ALLOW_GOOD_WEIGHT=1.45
+LEARNING_WARNING_BAD_WEIGHT=1.25
+LEARNING_SCORE_BOOST=1
+LEARNING_SCORE_PENALTY=1
+```
+
+Pesos por tipo de regla:
+
+```text
+LEARNING_WEIGHT_GLOBAL=0.35
+LEARNING_WEIGHT_ASSET=0.75
+LEARNING_WEIGHT_DIRECTION=0.45
+LEARNING_WEIGHT_ASSET_DIRECTION=1.35
+LEARNING_WEIGHT_CONTRACT=0.45
+LEARNING_WEIGHT_REASON=0.85
+LEARNING_WEIGHT_SCORE_BAND=0.65
+LEARNING_WEIGHT_FACTOR_SCORE=0.35
+LEARNING_WEIGHT_ASSET_REASON=1.25
+```
+
+Para endurecer el filtro:
+
+- Subir `LEARNING_MIN_RULE_SAMPLES`.
+- Subir `LEARNING_BLOCK_BAD_WEIGHT` si quieres bloquear menos, o bajarlo si quieres bloquear mas.
+- Subir `LEARNING_ALLOW_WIN_RATE_AT_LEAST` para exigir mas calidad antes de favorecer.
+- Bajar `LEARNING_BLOCK_WIN_RATE_BELOW` bloquea solo casos mas evidentemente malos.
+- Subir pesos de `ASSET_DIRECTION` y `ASSET_REASON` hace que combinaciones especificas manden mas.
+
+Para aflojarlo:
+
+- Bajar `LEARNING_MIN_RULE_SAMPLES`.
+- Subir `LEARNING_BLOCK_WIN_RATE_BELOW` detecta reglas malas antes.
+- Bajar `LEARNING_BLOCK_BAD_WEIGHT` hace que menos evidencia mala baste para bloquear.
+- Bajar `LEARNING_ALLOW_WIN_RATE_AT_LEAST` permite favorecer reglas buenas con menos exigencia.
+
+El punto inicial queda equilibrado: no bloquea en frio, espera 18 operaciones liquidadas globales, exige al menos 8 muestras por regla y solo bloquea cuando varias reglas con rendimiento negativo coinciden o cuando una regla especifica es criticamente mala.
+
+## Dashboard agregado
+
+El dashboard ahora muestra tarjetas de aprendizaje con:
+
+- Total de operaciones liquidadas.
+- Total de operaciones ganadas.
+- Total de operaciones perdidas.
+- Porcentaje de acierto general.
+- Operaciones permitidas por aprendizaje.
+- Operaciones bloqueadas por aprendizaje.
+- Reglas activas.
+- Sombras totales.
+- Sombras ganadas.
+- Sombras perdidas.
+- Porcentaje de acierto de sombras.
+- Sombras abiertas.
+- Sombras creadas por bloqueo de aprendizaje.
+
+## Como interpretar las sombras
+
+Cuando el aprendizaje bloquea una senal, el bot no descuenta saldo ni abre la operacion virtual normal. En cambio registra una operacion sombra con la misma direccion, entrada aproximada y expiracion.
+
+Despues, cuando llega la expiracion, la sombra se liquida como `shadow_settled`. Eso permite responder:
+
+```text
+Si el aprendizaje bloqueo esta operacion, habria ganado o perdido?
+```
+
+Si las sombras bloqueadas pierden con frecuencia, el filtro esta aportando valor. Si muchas sombras bloqueadas ganan, hay que aflojar los umbrales o revisar pesos.
