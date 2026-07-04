@@ -464,6 +464,7 @@ class LiveMarketEngine:
                         payload={"trade": trade.model_dump(mode="json")},
                     )
                 )
+                await self.learning.rebuild_from_virtual_trades()
                 settled.append(trade)
                 continue
             target_hits_before = self.virtual_account.state.target_hits

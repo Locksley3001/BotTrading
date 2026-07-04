@@ -221,8 +221,20 @@ class LearningService:
 
         rules: dict[str, dict[str, Any]] = defaultdict(_empty_rule)
         settled_count = 0
+        normal_settled_count = 0
+        shadow_settled_count = 0
         for trade in latest_trades.values():
-            if trade.get("status") != "settled" or not trade.get("outcome"):
+            status = trade.get("status")
+            if (
+                status
+                not in {
+                    VirtualTradeStatus.SETTLED,
+                    VirtualTradeStatus.SETTLED.value,
+                    VirtualTradeStatus.SHADOW_SETTLED,
+                    VirtualTradeStatus.SHADOW_SETTLED.value,
+                }
+                or not trade.get("outcome")
+            ):
                 continue
             signal = signals.get(trade.get("signal_id"), {})
             profit = trade_profit_from_row(trade)
@@ -230,12 +242,18 @@ class LearningService:
             for key in keys:
                 update_rule(rules[key], trade, profit)
             settled_count += 1
+            if status in {VirtualTradeStatus.SHADOW_SETTLED, VirtualTradeStatus.SHADOW_SETTLED.value}:
+                shadow_settled_count += 1
+            else:
+                normal_settled_count += 1
 
         payload = {
             "version": 1,
             "source": "deriv_virtual_outcomes",
             "updated_at": datetime.now(UTC).isoformat(),
             "settled_samples": settled_count,
+            "normal_settled_samples": normal_settled_count,
+            "shadow_settled_samples": shadow_settled_count,
             "rules": dict(sorted(rules.items())),
         }
         self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -282,12 +300,12 @@ class LearningService:
         ]
         allowed = _count_events(events, TradeEventType.LEARNING_FILTER_ALLOWED)
         blocked = _count_events(events, TradeEventType.LEARNING_FILTER_BLOCKED)
-        shadow_opened = _count_events(events, TradeEventType.LEARNING_SHADOW_OPENED)
-        shadow_closed = _count_events(events, TradeEventType.LEARNING_SHADOW_SETTLED)
         decisions_total = allowed + blocked
         return {
             "updated_at": learning.get("updated_at"),
             "settled_samples": int(learning.get("settled_samples") or 0),
+            "normal_settled_samples": int(learning.get("normal_settled_samples") or 0),
+            "shadow_settled_samples": int(learning.get("shadow_settled_samples") or 0),
             "rules_count": len(rules),
             "global_rule": rules.get("global") or _empty_rule(),
             "operations": {
@@ -303,8 +321,8 @@ class LearningService:
             "shadows": {
                 **_outcome_metrics(shadow_settled),
                 "open": len(shadow_open),
-                "opened_by_learning_block": shadow_opened,
-                "settled_by_learning_block": shadow_closed,
+                "opened_by_learning_block": len(shadow_open) + len(shadow_settled),
+                "settled_by_learning_block": len(shadow_settled),
             },
             "config": self.filter_config(),
         }

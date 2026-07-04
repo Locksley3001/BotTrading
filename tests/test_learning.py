@@ -51,6 +51,54 @@ async def test_learning_rebuilds_rules_from_settled_virtual_trades(tmp_path) -> 
 
 
 @pytest.mark.asyncio
+async def test_learning_rebuilds_rules_from_settled_shadow_trades(tmp_path) -> None:
+    settings = Settings(DATA_DIR=str(tmp_path))
+    store = LocalJsonlEventStore(tmp_path)
+    signal = Signal(
+        asset="frxUSDJPY",
+        display_name="USD/JPY",
+        market="forex",
+        direction=SignalDirection.RISE,
+        contract_type="CALL",
+        duration=15,
+        duration_unit="m",
+        timeframe=300,
+        score=8,
+        factor_score=3,
+        stake=10,
+        reason="moderate_bullish_pressure",
+    )
+    await store.upsert_signal(signal)
+    await store.upsert_virtual_trade(
+        VirtualTrade(
+            signal_id=signal.signal_id,
+            asset=signal.asset,
+            market=signal.market,
+            direction=signal.direction,
+            contract_type=signal.contract_type,
+            stake=10,
+            payout=18.5,
+            payout_rate=0.85,
+            entry_spot=161.0,
+            entry_epoch=1,
+            expiry_epoch=2,
+            status=VirtualTradeStatus.SHADOW_SETTLED,
+            outcome=Outcome.WIN,
+            exit_spot=161.1,
+            shadow_reason="learning_filter",
+        )
+    )
+
+    learning = await LearningService(settings, store, store).rebuild_from_virtual_trades()
+
+    assert learning["settled_samples"] == 1
+    assert learning["normal_settled_samples"] == 0
+    assert learning["shadow_settled_samples"] == 1
+    assert learning["rules"]["global"]["wins"] == 1
+    assert learning["rules"]["asset:frxUSDJPY"]["avg_profit"] == 8.5
+
+
+@pytest.mark.asyncio
 async def test_learning_filter_blocks_negative_specific_edge(tmp_path) -> None:
     settings = Settings(
         DATA_DIR=str(tmp_path),
@@ -123,6 +171,18 @@ async def test_learning_summary_counts_decisions_and_shadows(tmp_path) -> None:
     await store.append_event(
         TradeEvent(event_type=TradeEventType.LEARNING_SHADOW_OPENED, idempotency_key="shadow:1")
     )
+    await store.append_event(
+        TradeEvent(
+            event_type=TradeEventType.LEARNING_SHADOW_SETTLED,
+            idempotency_key="shadow_settled:duplicate_legacy_1",
+        )
+    )
+    await store.append_event(
+        TradeEvent(
+            event_type=TradeEventType.LEARNING_SHADOW_SETTLED,
+            idempotency_key="shadow_settled:duplicate_legacy_2",
+        )
+    )
     await store.upsert_virtual_trade(
         VirtualTrade(
             signal_id="shadow_sig_1",
@@ -148,3 +208,4 @@ async def test_learning_summary_counts_decisions_and_shadows(tmp_path) -> None:
     assert summary["learning_decisions"]["blocked"] == 1
     assert summary["shadows"]["total"] == 1
     assert summary["shadows"]["wins"] == 1
+    assert summary["shadows"]["settled_by_learning_block"] == 1
