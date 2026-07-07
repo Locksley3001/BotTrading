@@ -55,7 +55,7 @@ def test_duration_validation_uses_contract_range() -> None:
 
 
 def test_synthetic_market_is_blocked_by_default() -> None:
-    settings = Settings()
+    settings = Settings(DERIV_ALLOW_SYNTHETIC_MARKETS=False, DERIV_EXCLUDED_MARKETS="synthetic_index")
     symbol = DerivSymbol(
         symbol="R_100",
         display_name="Volatility 100",

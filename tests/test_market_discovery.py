@@ -64,7 +64,11 @@ class FakeClient:
 
 @pytest.mark.asyncio
 async def test_market_discovery_enables_only_verified_non_synthetic() -> None:
-    settings = Settings(MARKETS="frxXAUUSD,R_100")
+    settings = Settings(
+        MARKETS="frxXAUUSD,R_100",
+        DERIV_ALLOW_SYNTHETIC_MARKETS=False,
+        DERIV_EXCLUDED_MARKETS="synthetic_index",
+    )
     service = MarketDiscoveryService(settings, FakeClient())
     markets, events = await service.discover()
     by_symbol = {market.symbol: market for market in markets}

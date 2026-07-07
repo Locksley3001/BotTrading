@@ -104,11 +104,17 @@ class LiveMarketEngine:
         return cycle
 
     async def _enabled_markets(self) -> list[dict[str, Any]]:
-        markets = [row for row in self.local_store.read_markets(limit=500) if row.get("enabled")]
-        if markets:
+        configured_symbols = set(self.settings.markets or self.settings.deriv_primary_markets)
+        markets = [
+            row
+            for row in self.local_store.read_markets(limit=500)
+            if row.get("enabled") and (not configured_symbols or row.get("symbol") in configured_symbols)
+        ]
+        found_symbols = {str(row.get("symbol")) for row in markets}
+        if markets and (not configured_symbols or configured_symbols.issubset(found_symbols)):
             return markets
         service = MarketDiscoveryService(self.settings, self.client)
-        discovered, events = await service.discover(self.settings.live_test_markets or self.settings.markets)
+        discovered, events = await service.discover(configured_symbols)
         for market in discovered:
             await self.store.upsert_market(market)
         for event in events:
